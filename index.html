@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Robot Blueprint Lab</title>
+<style>
+html,body{margin:0;height:100%;background:#030e26;overflow:hidden;font-family:system-ui,sans-serif;color:#fff}
+#v,#c{position:fixed;inset:0;width:100%;height:100%}
+#v{object-fit:cover;transform:scaleX(-1);filter:brightness(.6)}
+#msg{position:fixed;top:12px;left:0;right:0;text-align:center;font-size:12px;color:#9cc4ff;pointer-events:none}
+#toast{position:fixed;top:40%;left:0;right:0;text-align:center;font-size:clamp(24px,7vw,48px);font-weight:700;letter-spacing:.06em;opacity:0;transition:opacity .6s;text-shadow:0 0 24px #4af;pointer-events:none}
+#toast.show{opacity:1;transition:none}
+#bar{position:fixed;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);display:flex;gap:8px}
+#bar button{border:1px solid #6aa8ff;border-radius:999px;padding:10px 18px;background:#06204acc;color:#cfe4ff;font:600 14px system-ui;cursor:pointer}
+#bar button:focus-visible{outline:2px solid #fff}
+#bar button.on{background:#fff;color:#031}
+</style>
+</head>
+<body>
+<video id="v" playsinline muted></video>
+<canvas id="c"></canvas>
+<div id="msg">Loading camera…</div>
+<div id="toast"></div>
+<div id="bar"><button id="pv">◀ Prev</button><button id="ex">Explode</button><button id="nx">Next ▶</button></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script>
+const V=document.getElementById('v'),C=document.getElementById('c'),X=C.getContext('2d'),msg=document.getElementById('msg'),toast=document.getElementById('toast');
+let W,Hs;function rs(){W=C.width=innerWidth;Hs=C.height=innerHeight}rs();addEventListener('resize',rs);
+function P(l){const vw=V.videoWidth||W,vh=V.videoHeight||Hs,s=Math.max(W/vw,Hs/vh);return[(1-l.x)*vw*s-(vw*s-W)/2,l.y*vh*s-(vh*s-Hs)/2]}
+
+/* ---------- 4 original robot designs ---------- */
+const M=[
+ {n:'TITAN MK1',c:'#d6ecff',f:'#2a64b0',hw:.11,hh:.14,tw:.15,th:.30,aw:.065,al:.42,lw:.075,ll:.43,pad:.07,core:0},
+ {n:'BOLT-71',c:'#8fd0ff',f:'#0c5fd0',hw:.10,hh:.12,tw:.17,th:.28,aw:.08,al:.40,lw:.085,ll:.42,pad:.10,core:1},
+ {n:'CIRCUIT-X',c:'#6ff3ff',f:'#0a7f8a',hw:.085,hh:.12,tw:.11,th:.30,aw:.045,al:.44,lw:.055,ll:.46,pad:.04,core:2},
+ {n:'STRIKER-6',c:'#9ff6ff',f:'#0e86c0',hw:.10,hh:.13,tw:.14,th:.30,aw:.07,al:.43,lw:.07,ll:.44,pad:.085,core:3}];
+
+/* ---------- drawing helpers (unit space: robot height = 1) ---------- */
+M.forEach((m,i)=>m.a=['#ffd24a','#ff9f43','#7dffb0','#ffe066'][i]);
+function poly(p,fill=true){X.beginPath();p.forEach((q,i)=>i?X.lineTo(q[0],q[1]):X.moveTo(q[0],q[1]));X.closePath();if(fill)X.fill();X.stroke()}
+function pl(w,h,c){const a=w/2,b=h/2,k=Math.min(w,h)*c;return[[-a+k,-b],[a-k,-b],[a,-b+k],[a,b-k],[a-k,b],[-a+k,b],[-a,b-k],[-a,-b+k]]}
+function plate(w,h,c=.22){poly(pl(w,h,c));X.save();X.globalAlpha*=.45;poly(pl(w-.016,h-.016,c),false);X.restore()}
+function ln(x1,y1,x2,y2){X.beginPath();X.moveTo(x1,y1);X.lineTo(x2,y2);X.stroke()}
+function bolt(x,y){X.beginPath();X.arc(x,y,.0055,0,6.3);X.stroke()}
+function circ(x,y,r){X.beginPath();X.arc(x,y,r,0,6.3);X.stroke()}
+function seams(w,h,n){for(let i=1;i<n;i++){const y=-h/2+h*i/n;ln(-w*.38,y,w*.38,y)}}
+function vent(x,y,w,n,g){for(let i=0;i<n;i++)ln(x-w/2,y+i*g,x+w/2,y+i*g)}
+function spokes(x,y,r,n,t){circ(x,y,r);for(let i=0;i<n;i++){const a=t+i*6.283/n;ln(x+Math.cos(a)*r*.3,y+Math.sin(a)*r*.3,x+Math.cos(a)*r,y+Math.sin(a)*r)}}
+function ticks(r,n,l){for(let i=0;i<n;i++){const a=i*6.283/n;ln(Math.cos(a)*r,Math.sin(a)*r,Math.cos(a)*(r+l),Math.sin(a)*(r+l))}}
+function piston(x,y1,y2){ln(x-.005,y1,x-.005,y2);ln(x+.005,y1,x+.005,y2);circ(x,y1,.007);circ(x,y2,.007)}
+function core(k,t){circ(0,0,.05);circ(0,0,.035);
+  if(k==0){for(let i=0;i<3;i++){const a=t+i*2.094;ln(0,0,Math.cos(a)*.045,Math.sin(a)*.045)}}
+  else if(k==1){for(let i=0;i<5;i++){const a=t*2+i*1.257;X.beginPath();X.arc(0,0,.04,a,a+.9);X.stroke()}}
+  else if(k==2){X.save();X.rotate(t);poly([[0,-.04],[.04,0],[0,.04],[-.04,0]]);X.restore()}
+  else{X.save();X.rotate(-t);poly([[0,-.045],[.04,.025],[-.04,.025]]);X.restore()}}
+function dHead(w,h,m,t){plate(w,h,.3);
+  poly([[-w*.2,-h/2],[0,-h/2-.04],[w*.2,-h/2]]);
+  poly([[-w*.38,-h*.12],[w*.38,-h*.12],[w*.28,h*.2],[-w*.28,h*.2]]);
+  X.save();X.lineWidth=.007;X.strokeStyle='#fff';ln(-w*.26,-h*.02,-w*.06,-h*.02);ln(w*.06,-h*.02,w*.26,-h*.02);X.restore();
+  vent(-w*.3,h*.28,w*.2,3,.012);vent(w*.3,h*.28,w*.2,3,.012);
+  circ(-w/2-.008,0,.012);circ(w/2+.008,0,.012);
+  ln(w*.32,-h/2,w*.4,-h/2-.06);ln(-w*.32,-h/2,-w*.4,-h/2-.06);
+  bolt(-w*.4,h*.4);bolt(w*.4,h*.4)}
+function dChest(w,h,m,t){plate(w,h,.18);
+  poly([[-w*.5,-h*.5],[-w*.28,-h*.5],[-w*.2,-h*.2],[-w*.5,-h*.15]]);
+  poly([[w*.5,-h*.5],[w*.28,-h*.5],[w*.2,-h*.2],[w*.5,-h*.15]]);
+  X.save();X.translate(0,-h*.18);ticks(.058,12,.012);core(m.core,t);X.restore();
+  for(let i=0;i<5;i++){const y=h*.12+i*h*.1;X.beginPath();X.moveTo(-w*.38,y);X.quadraticCurveTo(0,y+.012,w*.38,y);X.stroke()}
+  vent(-w*.42,h*.22,w*.1,4,.016);vent(w*.42,h*.22,w*.1,4,.016);
+  poly([[-.012,h*.38],[.012,h*.38],[0,h*.44]]);
+  [[-.4,-.4],[.4,-.4],[-.4,.4],[.4,.4]].forEach(q=>bolt(q[0]*w,q[1]*h))}
+function dPelvis(w,h,m,t){plate(w,h,.3);poly([[-w*.12,-h*.3],[w*.12,-h*.3],[0,h*.3]]);spokes(-w*.36,0,.022,6,t);spokes(w*.36,0,.022,6,-t)}
+function dArm(w,h,m,t,s){const pr=m.pad;
+  X.save();X.translate(s*w*.18,-h/2+pr*.8);
+  X.beginPath();X.ellipse(0,0,pr,pr*.8,0,0,6.3);X.fill();X.stroke();
+  X.beginPath();X.ellipse(0,0,pr*.7,pr*.55,0,0,6.3);X.stroke();ticks(pr*.45,8,.008);bolt(0,0);ln(-pr,0,-pr*1.25,0);ln(pr,0,pr*1.25,0);X.restore();
+  const uh=h*.4;X.save();X.translate(0,-h/2+uh/2+pr*.9);plate(w,uh);seams(w,uh,4);piston(-w*.3,-uh*.35,uh*.35);X.restore();
+  X.save();X.translate(0,-h/2+uh+pr*.9+.01);spokes(0,0,.022,6,t);X.restore();
+  const fh=h*.34;X.save();X.translate(0,h/2-fh/2-.06);plate(w*.88,fh);vent(0,-fh*.2,w*.4,4,.014);ln(-w*.3,fh*.38,w*.3,fh*.38);X.restore();
+  X.save();X.translate(0,h/2-.035);plate(w*.8,.03,.4);for(let i=-1;i<=1;i++){X.save();X.translate(i*w*.22,.03);plate(w*.14,.045,.3);X.restore()}X.restore()}
+function dLeg(w,h,m,t){const th=h*.46;
+  X.save();X.translate(0,-h/2+th/2);plate(w,th);seams(w,th,4);piston(w*.3,-th*.4,th*.4);vent(-w*.2,-th*.3,w*.3,3,.014);X.restore();
+  X.save();X.translate(0,-h/2+th);spokes(0,0,w*.28,6,t);X.restore();
+  const sh=h*.38;X.save();X.translate(0,h/2-.06-sh/2);plate(w*.86,sh);seams(w*.86,sh,3);
+  poly([[-w*.2,-sh*.1],[0,sh*.05],[w*.2,-sh*.1],[w*.2,-sh*.02],[0,sh*.13],[-w*.2,-sh*.02]]);X.restore();
+  circ(0,h/2-.06,w*.18);
+  poly([[-w*.5,h/2-.05],[w*.5,h/2-.05],[w*.78,h/2],[-w*.78,h/2]]);ln(-w*.2,h/2-.05,-w*.28,h/2);ln(w*.2,h/2-.05,w*.28,h/2)}
+const TAGS=['OPTICS SENSOR 01','FUSION CORE','GYRO BALANCE','SHOULDER FLARE','WRIST CANNON','KNEE ACTUATOR','SPRINT UPGRADE'],SIDE=[1,-1,1,-1,1,-1,1];
+function parts(m){return[
+ {k:'HEAD UNIT',x:0,y:-.43,w:m.hw*2,h:m.hh,dx:0,dy:-.13,d:dHead},
+ {k:'CORE CHEST',x:0,y:-.34+m.th/2,w:m.tw*2,h:m.th,dx:0,dy:-.02,d:dChest},
+ {k:'PELVIS',x:0,y:.01,w:m.tw*1.6,h:.1,dx:0,dy:.06,d:dPelvis},
+ {k:'LEFT ARM',x:-(m.tw+m.aw*.75),y:-.32+m.al/2,w:m.aw*2,h:m.al,dx:-.2,dy:0,d:dArm,s:-1},
+ {k:'RIGHT ARM',x:m.tw+m.aw*.75,y:-.32+m.al/2,w:m.aw*2,h:m.al,dx:.2,dy:0,d:dArm,s:1},
+ {k:'LEFT LEG',x:-m.lw*1.15,y:.06+m.ll/2,w:m.lw*2,h:m.ll,dx:-.12,dy:.1,d:dLeg},
+ {k:'RIGHT LEG',x:m.lw*1.15,y:.06+m.ll/2,w:m.lw*2,h:m.ll,dx:.12,dy:.1,d:dLeg}]}
+
+/* ---------- state ---------- */
+let mi=0,e=0,glitch=0,pointing=false,manual=false,tip=null,tipS=null,ff=0,armed=true,lastSw=0;
+function say(t){toast.textContent=t;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),900)}
+function go(i){mi=(i+M.length)%M.length;glitch=1;say(M[mi].n)}
+document.getElementById('pv').onclick=()=>go(mi-1);
+document.getElementById('nx').onclick=()=>go(mi+1);
+const exb=document.getElementById('ex');exb.onclick=()=>{manual=!manual;exb.classList.toggle('on',manual)};
+
+/* ---------- hand logic: point = explode + inspect, fist = next robot ---------- */
+function onR(r){
+  const L=r.multiHandLandmarks||[];let pt=null,fist=false;
+  L.forEach(lm=>{const p=lm.map(P),D=(a,b)=>Math.hypot(p[a][0]-p[b][0],p[a][1]-p[b][1]);
+    const up=[8,12,16,20].map(i=>D(i,0)>D(i-2,0)*1.08);
+    if(up[0]&&!up[1]&&!up[2]&&!up[3])pt=p[8];
+    else if(!up.some(Boolean))fist=true});
+  tip=pt;pointing=!!pt;
+  if(fist){ff++;if(ff>=6&&armed&&Date.now()-lastSw>900){go(mi+1);armed=false;lastSw=Date.now()}}
+  else{ff=0;armed=true}
+}
+
+/* ---------- render ---------- */
+(function frame(){
+  const t=performance.now()/1000;
+  X.setTransform(1,0,0,1,0,0);X.globalAlpha=1;X.shadowBlur=0;
+  X.fillStyle='rgba(3,14,38,.84)';X.fillRect(0,0,W,Hs);
+  for(let x=0;x<W;x+=24){X.strokeStyle=x%120?'rgba(120,180,255,.07)':'rgba(120,180,255,.16)';ln(x,0,x,Hs)}
+  for(let y=0;y<Hs;y+=24){X.strokeStyle=y%120?'rgba(120,180,255,.07)':'rgba(120,180,255,.16)';ln(0,y,W,y)}
+  const sy=(t*90)%Hs;X.fillStyle='rgba(120,200,255,.10)';X.fillRect(0,sy,W,3);
+
+  const m=M[mi],R=Math.min(Hs*.58,W*1),cx=W/2,cy=Hs*.5+8;
+  const target=(pointing||manual)?1:0;e+=(target-e)*.12;glitch*=.9;
+  if(tip)tipS=tipS?[tipS[0]*.5+tip[0]*.5,tipS[1]*.5+tip[1]*.5]:tip;else tipS=null;
+
+  const ps=parts(m);let sel=-1;
+  if(tipS&&e>.3){const ux=(tipS[0]-cx)/R,uy=(tipS[1]-cy)/R;let best=.22;
+    ps.forEach((p,i)=>{const px=p.x+p.dx*e,py=p.y+p.dy*e,d=Math.hypot(ux-px,uy-py);
+      const inside=Math.abs(ux-px)<p.w/2+.03&&Math.abs(uy-py)<p.h/2+.03;
+      if(inside&&d<best+.2&&(sel<0||d<best)){sel=i;best=d}});
+    if(sel<0)ps.forEach((p,i)=>{const d=Math.hypot(ux-p.x-p.dx*e,uy-p.y-p.dy*e);if(d<best){best=d;sel=i}})}
+
+  X.save();X.translate(cx,cy);X.scale(R,R);X.lineWidth=.004;X.lineJoin='round';
+  X.globalAlpha=1-glitch*.6;X.shadowColor=m.c;X.shadowBlur=8;
+  ps.forEach((p,i)=>{const on=i==sel;X.save();
+    X.translate(p.x+p.dx*e+(Math.random()-.5)*.05*glitch,p.y+p.dy*e);
+    if(on)X.scale(1.08,1.08);
+    X.strokeStyle=on?'#fff':m.c;const g=X.createLinearGradient(0,-p.h/2,0,p.h/2);g.addColorStop(0,m.f+(on?'ee':'99'));g.addColorStop(1,m.f+(on?'88':'22'));X.fillStyle=g;
+    p.d(p.w,p.h,m,t,p.s);X.restore()});
+  X.restore();
+
+  X.setTransform(1,0,0,1,0,0);X.globalAlpha=1;X.shadowBlur=0;
+  if(sel>=0){const p=ps[sel],px=cx+(p.x+p.dx*e)*R,py=cy+(p.y+p.dy*e)*R,left=px<cx;
+    X.font='600 13px ui-monospace,monospace';const tw=X.measureText(p.k).width,lx=left?14:W-14;
+    X.strokeStyle='#fff';X.lineWidth=1;ln(px,py,lx+(left?tw+6:-tw-6),py-26);
+    X.fillStyle='#fff';X.textAlign=left?'left':'right';X.fillText(p.k,lx,py-30);
+    X.fillStyle='#8fd0ff';X.fillText('▸ part isolated',lx,py-14)}
+  if(tipS){X.strokeStyle='#fff';X.lineWidth=2;X.beginPath();X.arc(tipS[0],tipS[1],14,0,6.3);X.stroke()}
+
+  X.strokeStyle='rgba(140,190,255,.35)';X.lineWidth=1;
+  for(let y=60;y<Hs-80;y+=12)ln(0,y,y%120==0?14:7,y);
+  X.strokeStyle=m.c;X.lineWidth=2;
+  [[8,8,1,1],[W-8,8,-1,1],[8,Hs-8,1,-1],[W-8,Hs-8,-1,-1]].forEach(q=>{X.beginPath();X.moveTo(q[0],q[1]+q[3]*22);X.lineTo(q[0],q[1]);X.lineTo(q[0]+q[2]*22,q[1]);X.stroke()});
+  X.font='600 10px ui-monospace,monospace';
+  ps.forEach((p,i)=>{if(i==sel)return;const sd=SIDE[i],py=cy+(p.y+p.dy*e)*R,px=cx+(p.x+p.dx*e)*R+sd*p.w/2*R,lx=sd<0?14:W-14,tw=X.measureText(TAGS[i]).width;
+    X.strokeStyle=m.a+'88';X.lineWidth=1;ln(px,py,lx+(sd<0?tw+8:-tw-8),py);
+    X.fillStyle=m.a;X.fillRect(lx+(sd<0?-6:-2),py-4,8,8);
+    X.textAlign=sd<0?'left':'right';X.fillStyle='#d6ecff';X.fillText(TAGS[i],lx+(sd<0?6:-8),py+3)});
+  X.textAlign='left';
+  [['PWR',m.tw*4],['ARM',m.aw*10],['SPD',1-m.tw*3]].forEach((q,i)=>{const y=58+i*12;X.fillStyle='#9cc4ff';X.fillText(q[0],16,y+7);X.strokeStyle=m.c;X.lineWidth=1;X.strokeRect(46,y,70,8);X.fillStyle=m.a;X.fillRect(46,y,70*Math.min(1,q[1]),8)});
+  X.fillStyle=m.c;X.font='700 15px ui-monospace,monospace';X.textAlign='left';X.fillText('EXOFRAME / '+m.n,16,44);
+  for(let i=0;i<M.length;i++){X.fillStyle=i==mi?'#fff':'#ffffff44';X.beginPath();X.arc(W-24-i*16,40,4,0,6.3);X.fill()}
+  requestAnimationFrame(frame)})();
+
+/* ---------- MediaPipe ---------- */
+const hd=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+hd.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:.6,minTrackingConfidence:.6});
+hd.onResults(onR);
+new Camera(V,{onFrame:async()=>{await hd.send({image:V})},width:1280,height:720}).start()
+  .then(()=>msg.textContent='☝ Point to split into parts · ✊ Fist for next robot')
+  .catch(()=>msg.textContent='Camera permission needed (use https). Buttons below still work.');
+</script>
+</body>
+</html>
