@@ -4,9 +4,9 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">  
 <title>Robot Blueprint Lab</title>  
 <style>  
-html,body{margin:0;height:100%;background:#030e26;overflow:hidden;font-family:system-ui,sans-serif;color:#fff}  
+html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,sans-serif;color:#fff}  
 #v,#c{position:fixed;inset:0;width:100%;height:100%}  
-#v{object-fit:cover;transform:scaleX(-1);filter:brightness(.95)}  
+#v{object-fit:cover;transform:scaleX(-1);filter:none}  
 #msg{position:fixed;top:12px;left:0;right:0;text-align:center;font-size:12px;color:#9cc4ff;pointer-events:none}  
 #toast{position:fixed;top:40%;left:0;right:0;text-align:center;font-size:clamp(24px,7vw,48px);font-weight:700;letter-spacing:.06em;opacity:0;transition:opacity .6s;text-shadow:0 0 24px #4af;pointer-events:none}  
 #toast.show{opacity:1;transition:none}  
@@ -94,7 +94,7 @@ function parts(m){return[
  {k:'RIGHT LEG',x:m.lw*1.15,y:.06+m.ll/2,w:m.lw*2,h:m.ll,dx:.12,dy:.1,d:dLeg}]}  
   
 /* ---------- state ---------- */  
-let pe=[0,0,0,0,0,0,0],prevSel=-1,openT=0,mi=0,e=0,glitch=0,pointing=false,manual=false,tip=null,tipS=null,ff=0,armed=true,lastSw=0;  
+let pe=[0,0,0,0,0,0,0],pa=[1,1,1,1,1,1,1],prevSel=-1,openT=0,mi=0,e=0,glitch=0,pointing=false,manual=false,tip=null,tipS=null,ff=0,armed=true,lastSw=0;  
 function say(t){toast.textContent=t;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),900)}  
 function go(i){mi=(i+M.length)%M.length;glitch=1;say(M[mi].n)}  
 document.getElementById('pv').onclick=()=>go(mi-1);  
@@ -118,10 +118,7 @@ function onR(r){
 (function frame(){  
   const t=performance.now()/1000;  
   X.setTransform(1,0,0,1,0,0);X.globalAlpha=1;X.shadowBlur=0;  
-  X.fillStyle='rgba(3,14,38,.2)';X.fillRect(0,0,W,Hs);  
-  for(let x=0;x<W;x+=24){X.strokeStyle=x%120?'rgba(120,180,255,.07)':'rgba(120,180,255,.16)';ln(x,0,x,Hs)}  
-  for(let y=0;y<Hs;y+=24){X.strokeStyle=y%120?'rgba(120,180,255,.07)':'rgba(120,180,255,.16)';ln(0,y,W,y)}  
-  const sy=(t*90)%Hs;X.fillStyle='rgba(120,200,255,.10)';X.fillRect(0,sy,W,3);  
+  X.clearRect(0,0,W,Hs);  
   
   const m=M[mi],R=Math.min(Hs*.58,W*1),cx=W/2,cy=Hs*.5+8;  
   glitch*=.9;  
@@ -134,18 +131,18 @@ function onR(r){
     ps.forEach((p,i)=>{let d=hit(i,pe[i]);if(i==prevSel)d=Math.min(d,hit(i,1)-.05);if(d<best){best=d;sel=i}});  
     if(best>=9){best=.12;sel=-1;ps.forEach((p,i)=>{const d=Math.hypot(ux-p.x-p.dx*pe[i],uy-p.y-p.dy*pe[i]);if(d<best){best=d;sel=i}})}}  
   prevSel=sel;  
-  ps.forEach((p,i)=>{pe[i]+=(((i==sel||manual)?1:0)-pe[i])*.18;p.e=pe[i]});  
+  ps.forEach((p,i)=>{pe[i]+=(((i==sel||manual)?1:0)-pe[i])*.18;p.e=pe[i];pa[i]+=(((sel>=0&&i!=sel&&!manual)?0:1)-pa[i])*.2});  
   
   X.save();X.translate(cx,cy);X.scale(R,R);X.lineWidth=.004;X.lineJoin='round';  
   X.globalAlpha=1-glitch*.6;X.shadowColor=m.c;X.shadowBlur=8;  
-  ps.map((p,i)=>[p,i]).sort((a,b)=>(a[1]==sel)-(b[1]==sel)).forEach(([p,i])=>{const on=i==sel;X.save();  
+  ps.map((p,i)=>[p,i]).sort((a,b)=>(a[1]==sel)-(b[1]==sel)).forEach(([p,i])=>{const on=i==sel;if(pa[i]<.02)return;X.save();X.globalAlpha=pa[i]*(1-glitch*.6);  
     X.translate(p.x+p.dx*p.e+(Math.random()-.5)*.05*glitch,p.y+p.dy*p.e);  
-    if(on)X.scale(1.08,1.08);  
+    if(on)X.scale(1.2,1.2);  
     X.strokeStyle=on?'#fff':m.c;const g=X.createLinearGradient(0,-p.h/2,0,p.h/2);g.addColorStop(0,m.f+(on?'ee':'99'));g.addColorStop(1,m.f+(on?'88':'22'));X.fillStyle=g;  
     p.d(p.w,p.h,m,t,p.s);X.restore()});  
   X.restore();  
   
-  X.setTransform(1,0,0,1,0,0);X.globalAlpha=1;X.shadowBlur=0;  
+  X.setTransform(1,0,0,1,0,0);X.globalAlpha=1;X.shadowBlur=0;X.shadowColor='#000';X.shadowBlur=4;  
   if(sel>=0){const p=ps[sel],px=cx+(p.x+p.dx*p.e)*R,py=cy+(p.y+p.dy*p.e)*R,left=px<cx;  
     X.font='600 13px ui-monospace,monospace';const tw=X.measureText(p.k).width,lx=left?14:W-14;  
     X.strokeStyle='#fff';X.lineWidth=1;ln(px,py,lx+(left?tw+6:-tw-6),py-26);  
@@ -158,7 +155,7 @@ function onR(r){
   X.strokeStyle=m.c;X.lineWidth=2;  
   [[8,8,1,1],[W-8,8,-1,1],[8,Hs-8,1,-1],[W-8,Hs-8,-1,-1]].forEach(q=>{X.beginPath();X.moveTo(q[0],q[1]+q[3]*22);X.lineTo(q[0],q[1]);X.lineTo(q[0]+q[2]*22,q[1]);X.stroke()});  
   X.font='600 10px ui-monospace,monospace';  
-  ps.forEach((p,i)=>{if(i==sel)return;const sd=SIDE[i],py=cy+(p.y+p.dy*p.e)*R,px=cx+(p.x+p.dx*p.e)*R+sd*p.w/2*R,lx=sd<0?14:W-14,tw=X.measureText(TAGS[i]).width;  
+  ps.forEach((p,i)=>{if(sel>=0)return;const sd=SIDE[i],py=cy+(p.y+p.dy*p.e)*R,px=cx+(p.x+p.dx*p.e)*R+sd*p.w/2*R,lx=sd<0?14:W-14,tw=X.measureText(TAGS[i]).width;  
     X.strokeStyle=m.a+'88';X.lineWidth=1;ln(px,py,lx+(sd<0?tw+8:-tw-8),py);  
     X.fillStyle=m.a;X.fillRect(lx+(sd<0?-6:-2),py-4,8,8);  
     X.textAlign=sd<0?'left':'right';X.fillStyle='#d6ecff';X.fillText(TAGS[i],lx+(sd<0?6:-8),py+3)});  
